@@ -36,7 +36,7 @@ const CALIBRATION_QUESTIONS = [
 
 // ─── Generate unique IDs ───────────────────────────────────────────
 let blockCounter = 0;
-const genId = () => `block_${++blockCounter}`;
+const genId = () => `${++blockCounter}`;
 
 export default function ClaudeCompose() {
   // ─── App state ─────────────────────────────────────────────────────

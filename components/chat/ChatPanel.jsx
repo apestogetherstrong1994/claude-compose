@@ -5,6 +5,7 @@ import { ArrowRight } from "lucide-react";
 import { C } from "../design-system";
 import { ClaudeLogo } from "../icons/ClaudeLogo";
 import { StreamingDots } from "./StreamingDots";
+import { InlineMarkdown } from "./InlineMarkdown";
 
 export function ChatPanel({ messages, input, setInput, onSend, isStreaming }) {
   const messagesRef = useRef(null);
@@ -26,7 +27,7 @@ export function ChatPanel({ messages, input, setInput, onSend, isStreaming }) {
 
   return (
     <div style={{
-      width: 360, borderLeft: `1px solid ${C.border}`,
+      width: 340, minWidth: 340, flexShrink: 0, borderLeft: `1px solid ${C.border}`,
       display: "flex", flexDirection: "column", background: C.bg,
     }}>
       {/* Header */}
@@ -69,11 +70,18 @@ export function ChatPanel({ messages, input, setInput, onSend, isStreaming }) {
               fontSize: 13, lineHeight: 1.6, color: C.text, fontFamily: C.sans,
               whiteSpace: "pre-wrap",
             }}>
-              {msg.displayContent || msg.content}
+              {msg.role === "assistant"
+                ? ((msg.displayContent != null ? msg.displayContent : msg.content) || "I've added a proposal to the document.").split("\n\n").map((para, j, arr) => (
+                    <div key={j} style={{ marginBottom: j < arr.length - 1 ? 8 : 0 }}>
+                      <InlineMarkdown text={para} />
+                    </div>
+                  ))
+                : (msg.displayContent || msg.content)
+              }
             </div>
           </div>
         ))}
-        {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
+        {isStreaming && (!messages.length || (messages[messages.length - 1]?.role === "assistant" && !(messages[messages.length - 1]?.displayContent || messages[messages.length - 1]?.content))) && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <ClaudeLogo size={14} />
             <StreamingDots />

@@ -125,13 +125,13 @@ export function DocumentPanel({
 
   return (
     <div ref={panelRef} style={{
-      flex: 1, overflowY: "auto", padding: "24px 32px",
+      flex: 1, minWidth: 300, overflowY: "auto", padding: "24px 40px",
       display: "flex", flexDirection: "column",
     }}>
       {hasContent && <ContributionBar blocks={blocks} />}
 
       {/* Empty state */}
-      {!hasContent && (
+      {!hasContent && insertingAfter !== "start" && (
         <div style={{
           flex: 1, display: "flex", flexDirection: "column",
           alignItems: "center", justifyContent: "center", gap: 16,
@@ -152,8 +152,11 @@ export function DocumentPanel({
         </div>
       )}
 
-      {/* Insert at start */}
-      {hasContent && renderInsertButton("start")}
+      {/* Insert at start - always show when inserting */}
+      {insertingAfter === "start" && renderInsertButton("start")}
+
+      {/* Insert at start (when document has content) */}
+      {hasContent && insertingAfter !== "start" && renderInsertButton("start")}
 
       {/* Blocks + proposals */}
       {blocks.map((block) => (

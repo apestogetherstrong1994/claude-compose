@@ -31,7 +31,7 @@ export function LeftSidebar({ blocks, voiceProfile, isAnalyzing }) {
 
   return (
     <div style={{
-      width: 240, borderRight: `1px solid ${C.border}`,
+      width: 220, minWidth: 220, flexShrink: 0, borderRight: `1px solid ${C.border}`,
       overflowY: "auto", background: C.bg,
       paddingTop: 12,
     }}>

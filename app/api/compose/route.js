@@ -66,7 +66,7 @@ export async function POST(request) {
       .replace("{CALIBRATION_CONTEXT}", buildCalibrationContext(calibration));
 
     const stream = await client.messages.stream({
-      model: "claude-sonnet-4-5-20241022",
+      model: "claude-sonnet-4-5-20250929",
       max_tokens: 4096,
       system: systemPrompt,
       messages: formattedMessages,
