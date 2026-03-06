@@ -29,6 +29,7 @@ export function DocumentPanel({
   const [newText, setNewText] = useState("");
   const [editingBlockId, setEditingBlockId] = useState(null);
   const [suggestionUsed, setSuggestionUsed] = useState(null); // track if textarea was pre-filled
+  const [awaitingSuggestion, setAwaitingSuggestion] = useState(false); // waiting for late suggestion
   const textareaRef = useRef(null);
   const panelRef = useRef(null);
 
@@ -46,6 +47,18 @@ export function DocumentPanel({
       panelRef.current.scrollTop = panelRef.current.scrollHeight;
     }
   }, [blocks.length, proposals.length, streamingProposal]);
+
+  // Fill textarea when late-arriving suggestion arrives
+  useEffect(() => {
+    if (awaitingSuggestion && nextSuggestion && insertingAfter !== null) {
+      // Only auto-fill if the user hasn't started typing yet
+      if (!newText) {
+        setNewText(nextSuggestion);
+        setSuggestionUsed(nextSuggestion);
+        setAwaitingSuggestion(false);
+      }
+    }
+  }, [nextSuggestion, awaitingSuggestion, insertingAfter, newText]);
 
   // Auto-dismiss hint bar after 30s
   useEffect(() => {
@@ -70,8 +83,15 @@ export function DocumentPanel({
         e.preventDefault();
         const suggestion = onStartNextParagraph();
         setInsertingAfter(justSavedBlockId);
-        setNewText(suggestion);
-        setSuggestionUsed(suggestion || null);
+        if (suggestion) {
+          setNewText(suggestion);
+          setSuggestionUsed(suggestion);
+          setAwaitingSuggestion(false);
+        } else {
+          setNewText("");
+          setSuggestionUsed(null);
+          setAwaitingSuggestion(true);
+        }
       }
       // ⇧+⌘+Enter → Edit previous paragraph
       if (e.key === "Enter" && e.metaKey && e.shiftKey) {
@@ -99,14 +119,22 @@ export function DocumentPanel({
       setNewText("");
       setInsertingAfter(null);
       setSuggestionUsed(null);
+      setAwaitingSuggestion(false);
     }
   };
 
   const handleStartNext = () => {
     const suggestion = onStartNextParagraph();
     setInsertingAfter(justSavedBlockId);
-    setNewText(suggestion);
-    setSuggestionUsed(suggestion || null);
+    if (suggestion) {
+      setNewText(suggestion);
+      setSuggestionUsed(suggestion);
+      setAwaitingSuggestion(false);
+    } else {
+      setNewText("");
+      setSuggestionUsed(null);
+      setAwaitingSuggestion(true); // Will fill when suggestion arrives
+    }
   };
 
   const handleEditPrev = () => {
@@ -123,14 +151,17 @@ export function DocumentPanel({
       return (
         <div style={{ padding: "8px 16px 8px 20px" }}>
           {/* Suggestion label */}
-          {suggestionUsed && (
+          {(suggestionUsed || awaitingSuggestion) && (
             <div style={{
               display: "flex", alignItems: "center", gap: 6,
               fontSize: 11, fontFamily: C.sans, marginBottom: 6,
               color: C.accent, opacity: 0.8,
             }}>
               <Sparkles size={12} />
-              Claude's suggestion — edit freely, then ⌘+Enter to save
+              {awaitingSuggestion
+                ? "Claude is thinking of a suggestion..."
+                : "Claude's suggestion — edit freely, then ⌘+Enter to save"
+              }
             </div>
           )}
           <textarea
@@ -147,6 +178,7 @@ export function DocumentPanel({
                 setInsertingAfter(null);
                 setNewText("");
                 setSuggestionUsed(null);
+                setAwaitingSuggestion(false);
                 if (onClearPostSave) onClearPostSave();
               }
             }}
@@ -163,7 +195,7 @@ export function DocumentPanel({
             <span style={{ fontSize: 11, color: C.textMuted, fontFamily: C.sans, marginRight: "auto" }}>
               ⌘+Enter to add · Esc to cancel
             </span>
-            <button onClick={() => { setInsertingAfter(null); setNewText(""); setSuggestionUsed(null); }} style={{
+            <button onClick={() => { setInsertingAfter(null); setNewText(""); setSuggestionUsed(null); setAwaitingSuggestion(false); }} style={{
               padding: "6px 12px", borderRadius: 6, border: `1px solid ${C.border}`,
               background: "transparent", color: C.textMuted, fontSize: 12,
               fontFamily: C.sans, cursor: "pointer",

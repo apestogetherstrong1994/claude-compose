@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { C } from "@/components/design-system";
 import { TopBar } from "@/components/layout/TopBar";
 import { WelcomeScreen } from "@/components/welcome/WelcomeScreen";
+import { DraftPasteOverlay } from "@/components/welcome/DraftPasteOverlay";
 import { QuestionOverlay } from "@/components/questions/QuestionOverlay";
 import { DocumentPanel } from "@/components/document/DocumentPanel";
 import { ChatPanel } from "@/components/chat/ChatPanel";
@@ -40,7 +41,7 @@ const genId = () => `${++blockCounter}`;
 
 export default function ClaudeCompose() {
   // ─── App state ─────────────────────────────────────────────────────
-  const [phase, setPhase] = useState("welcome"); // welcome | calibrating | composing
+  const [phase, setPhase] = useState("welcome"); // welcome | calibrating | pasting | composing
   const [taskType, setTaskType] = useState(null);
   const [calibration, setCalibration] = useState({});
   const [calibrationIndex, setCalibrationIndex] = useState(0);
@@ -318,7 +319,9 @@ export default function ClaudeCompose() {
   const clearPostSaveState = useCallback(() => {
     setJustSavedBlockId(null);
     setEditPreviousDepth(0);
-    if (suggestAbortRef.current) suggestAbortRef.current.abort();
+    // Note: don't abort suggestAbortRef here — the suggestion fetch should
+    // continue even after the hint bar is dismissed, so late-arriving
+    // suggestions can still populate the textarea.
   }, []);
 
   const handleStartNextParagraph = useCallback(() => {
@@ -453,10 +456,40 @@ export default function ClaudeCompose() {
   // WELCOME & CALIBRATION
   // ═══════════════════════════════════════════════════════════════════
   const handleTaskCard = (type) => {
+    if (type === "continue") {
+      setTaskType(type);
+      setPhase("pasting");
+      return;
+    }
     setTaskType(type);
     setPhase("calibrating");
     setCalibrationIndex(0);
     setCalibration({});
+  };
+
+  const handleDraftSubmit = (text) => {
+    const paragraphs = text.split(/\n\n+/).filter(Boolean);
+    const newBlocks = paragraphs.map(p => ({
+      id: genId(),
+      text: p.trim(),
+      author: "human",
+      status: "accepted",
+      reasoning: null,
+    }));
+    setBlocks(newBlocks);
+    setPhase("composing");
+
+    const initialPrompt = `I'm continuing a piece I've already started. I've pasted ${paragraphs.length} paragraph${paragraphs.length > 1 ? "s" : ""} into the document.
+
+Please:
+1. Read what I have carefully
+2. Tell me what you notice about my voice and style (be specific — sentence rhythm, vocabulary, tone)
+3. Identify what kind of writing this is and where it seems to be heading
+4. Suggest what paragraph should come next with a [PROPOSAL]
+
+Don't ask me questions you can already answer from reading the text.`;
+
+    streamMessage(initialPrompt, []);
   };
 
   const handleWelcomeSubmit = (text) => {
@@ -540,6 +573,14 @@ export default function ClaudeCompose() {
           setWelcomeInput={setWelcomeInput}
           onSubmit={handleWelcomeSubmit}
           onTaskCard={handleTaskCard}
+        />
+      )}
+
+      {/* Paste draft phase */}
+      {phase === "pasting" && (
+        <DraftPasteOverlay
+          onSubmit={handleDraftSubmit}
+          onBack={() => setPhase("welcome")}
         />
       )}
 
