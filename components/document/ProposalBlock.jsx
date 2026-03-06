@@ -1,0 +1,130 @@
+"use client";
+
+import { useState } from "react";
+import { Check, X, PenLine } from "lucide-react";
+import { C } from "../design-system";
+
+export function ProposalBlock({ proposal, onAccept, onReject, onRiff, isStreaming }) {
+  const [isRiffing, setIsRiffing] = useState(false);
+  const [riffText, setRiffText] = useState(proposal.text || "");
+
+  const handleRiff = () => {
+    setRiffText(proposal.text || "");
+    setIsRiffing(true);
+  };
+
+  const handleSaveRiff = () => {
+    if (riffText.trim()) {
+      onRiff(riffText.trim());
+      setIsRiffing(false);
+    }
+  };
+
+  return (
+    <div style={{
+      background: C.accentSoft,
+      borderLeft: `3px solid ${C.accent}`,
+      borderRadius: 12,
+      padding: "16px 20px",
+      margin: "8px 0",
+      animation: "slideUp 0.4s ease",
+    }}>
+      {/* Reasoning */}
+      {proposal.reasoning && (
+        <div style={{
+          fontSize: 13, fontStyle: "italic", color: C.textSec,
+          fontFamily: C.sans, marginBottom: 12, lineHeight: 1.5,
+        }}>
+          {proposal.reasoning}
+        </div>
+      )}
+
+      {/* Proposed text or riff editor */}
+      {isRiffing ? (
+        <div>
+          <textarea
+            value={riffText}
+            onChange={e => setRiffText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter" && e.metaKey) handleSaveRiff();
+              if (e.key === "Escape") setIsRiffing(false);
+            }}
+            autoFocus
+            style={{
+              width: "100%", background: C.bgComposer, border: `1px solid ${C.borderHover}`,
+              borderRadius: 8, padding: "12px 14px", color: C.text, fontSize: 16,
+              fontFamily: C.serif, lineHeight: 1.8, resize: "none", outline: "none",
+              minHeight: 80,
+            }}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setIsRiffing(false)} style={{
+              padding: "6px 12px", borderRadius: 6, border: `1px solid ${C.border}`,
+              background: "transparent", color: C.textMuted, fontSize: 12,
+              fontFamily: C.sans, cursor: "pointer",
+            }}>
+              Cancel
+            </button>
+            <button onClick={handleSaveRiff} style={{
+              padding: "6px 12px", borderRadius: 6, border: "none",
+              background: C.blue, color: "#fff", fontSize: 12,
+              fontFamily: C.sans, cursor: "pointer",
+            }}>
+              Use my version
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p style={{
+          fontFamily: C.serif, fontSize: 16, lineHeight: 1.8,
+          color: C.text, margin: 0, whiteSpace: "pre-wrap",
+          opacity: isStreaming ? 0.9 : 1,
+        }}>
+          {proposal.text || ""}
+          {isStreaming && <span style={{ animation: "pulse 1.4s ease-in-out infinite" }}>|</span>}
+        </p>
+      )}
+
+      {/* Action buttons */}
+      {!isStreaming && proposal.text && !isRiffing && (
+        <div style={{
+          display: "flex", gap: 8, marginTop: 14,
+        }}>
+          <button onClick={onAccept} style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "7px 14px",
+            borderRadius: C.radiusPill, border: "none",
+            background: C.green, color: "#fff", fontSize: 12,
+            fontFamily: C.sans, fontWeight: 500, cursor: "pointer",
+            transition: "all 0.15s",
+          }}
+          onMouseOver={e => e.currentTarget.style.opacity = "0.85"}
+          onMouseOut={e => e.currentTarget.style.opacity = "1"}>
+            <Check size={13} /> Accept
+          </button>
+          <button onClick={onReject} style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "7px 14px",
+            borderRadius: C.radiusPill, border: `1px solid ${C.border}`,
+            background: "transparent", color: C.textMuted, fontSize: 12,
+            fontFamily: C.sans, fontWeight: 500, cursor: "pointer",
+            transition: "all 0.15s",
+          }}
+          onMouseOver={e => { e.currentTarget.style.borderColor = C.red; e.currentTarget.style.color = C.red; }}
+          onMouseOut={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textMuted; }}>
+            <X size={13} /> Reject
+          </button>
+          <button onClick={handleRiff} style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "7px 14px",
+            borderRadius: C.radiusPill, border: `1px solid ${C.border}`,
+            background: "transparent", color: C.textSec, fontSize: 12,
+            fontFamily: C.sans, fontWeight: 500, cursor: "pointer",
+            transition: "all 0.15s",
+          }}
+          onMouseOver={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.color = C.blue; }}
+          onMouseOut={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textSec; }}>
+            <PenLine size={13} /> Riff
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
