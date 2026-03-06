@@ -75,7 +75,7 @@ export default function ClaudeCompose() {
   // ═══════════════════════════════════════════════════════════════════
   // STREAMING
   // ═══════════════════════════════════════════════════════════════════
-  const streamMessage = useCallback(async (userMessage, existingMessages = []) => {
+  const streamMessage = useCallback(async (userMessage, existingMessages = [], overrideBlocks = null) => {
     setIsStreaming(true);
     const newMessages = [...existingMessages, { role: "user", content: userMessage }];
     setMessages(newMessages);
@@ -94,7 +94,7 @@ export default function ClaudeCompose() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: [...newMessages],
-          documentBlocks: blocks,
+          documentBlocks: overrideBlocks || blocks,
           voiceProfile,
           calibration,
         }),
@@ -489,7 +489,7 @@ Please:
 
 Don't ask me questions you can already answer from reading the text.`;
 
-    streamMessage(initialPrompt, []);
+    streamMessage(initialPrompt, [], newBlocks);
   };
 
   const handleWelcomeSubmit = (text) => {
@@ -524,6 +524,7 @@ Don't ask me questions you can already answer from reading the text.`;
 
     // Build initial message based on task type and calibration
     let initialPrompt = "";
+    let newBlocks = null;
     const writingType = finalCalibration["What kind of writing is this?"] || "general writing";
     const workStyle = finalCalibration["How should we work together?"] || "Build it paragraph by paragraph";
 
@@ -532,7 +533,7 @@ Don't ask me questions you can already answer from reading the text.`;
       if (text) {
         // User pasted text — add as initial blocks
         const paragraphs = text.split(/\n\n+/).filter(Boolean);
-        const newBlocks = paragraphs.map(p => ({
+        newBlocks = paragraphs.map(p => ({
           id: genId(),
           text: p.trim(),
           author: "human",
@@ -552,7 +553,7 @@ Don't ask me questions you can already answer from reading the text.`;
       initialPrompt = `I'd like to co-write a ${writingType} piece with you. My preferred collaboration style: ${workStyle}. Let's begin — ask me one question to get started.`;
     }
 
-    streamMessage(initialPrompt, []);
+    streamMessage(initialPrompt, [], newBlocks);
   };
 
   // ═══════════════════════════════════════════════════════════════════
