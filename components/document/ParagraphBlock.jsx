@@ -4,11 +4,20 @@ import { useState, useRef, useEffect } from "react";
 import { Pencil, Check, X } from "lucide-react";
 import { C } from "../design-system";
 
-export function ParagraphBlock({ block, onUpdate, onDelete }) {
+export function ParagraphBlock({ block, onUpdate, onDelete, editingBlockId, onEditingComplete }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(block.text);
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef(null);
+
+  // Programmatic edit mode triggered by edit-previous shortcut
+  useEffect(() => {
+    if (editingBlockId === block.id && !isEditing) {
+      setIsEditing(true);
+      setEditText(block.text);
+      if (onEditingComplete) onEditingComplete();
+    }
+  }, [editingBlockId, block.id, block.text, isEditing, onEditingComplete]);
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {

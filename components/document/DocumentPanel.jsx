@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Plus, ArrowRight } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Plus, ArrowRight, Sparkles } from "lucide-react";
 import { C } from "../design-system";
 import { ParagraphBlock } from "./ParagraphBlock";
 import { ProposalBlock } from "./ProposalBlock";
@@ -17,9 +17,18 @@ export function DocumentPanel({
   onAcceptProposal,
   onRejectProposal,
   onRiffProposal,
+  // Auto-suggest props
+  justSavedBlockId,
+  nextSuggestion,
+  isSuggestingNext,
+  onStartNextParagraph,
+  onEditPrevious,
+  onClearPostSave,
 }) {
   const [insertingAfter, setInsertingAfter] = useState(null); // block id or "start"
   const [newText, setNewText] = useState("");
+  const [editingBlockId, setEditingBlockId] = useState(null);
+  const [suggestionUsed, setSuggestionUsed] = useState(null); // track if textarea was pre-filled
   const textareaRef = useRef(null);
   const panelRef = useRef(null);
 
@@ -38,18 +47,92 @@ export function DocumentPanel({
     }
   }, [blocks.length, proposals.length, streamingProposal]);
 
+  // Auto-dismiss hint bar after 30s
+  useEffect(() => {
+    if (!justSavedBlockId) return;
+    const timer = setTimeout(() => {
+      if (onClearPostSave) onClearPostSave();
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [justSavedBlockId, onClearPostSave]);
+
+  // Document-level keyboard listener for post-save shortcuts
+  useEffect(() => {
+    if (!justSavedBlockId) return;
+
+    const handleKeyDown = (e) => {
+      // Don't intercept if user is typing in a textarea
+      if (document.activeElement?.tagName === "TEXTAREA") return;
+      if (document.activeElement?.tagName === "INPUT") return;
+
+      // ⌘+Enter (without Shift) → Start next paragraph with suggestion
+      if (e.key === "Enter" && e.metaKey && !e.shiftKey) {
+        e.preventDefault();
+        const suggestion = onStartNextParagraph();
+        setInsertingAfter(justSavedBlockId);
+        setNewText(suggestion);
+        setSuggestionUsed(suggestion || null);
+      }
+      // ⇧+⌘+Enter → Edit previous paragraph
+      if (e.key === "Enter" && e.metaKey && e.shiftKey) {
+        e.preventDefault();
+        const targetBlockId = onEditPrevious();
+        if (targetBlockId) {
+          setEditingBlockId(targetBlockId);
+          if (onClearPostSave) onClearPostSave();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [justSavedBlockId, onStartNextParagraph, onEditPrevious, onClearPostSave]);
+
   const handleInsert = () => {
     if (newText.trim()) {
-      onAddBlock(newText.trim(), insertingAfter);
+      // Determine author based on whether suggestion was used
+      let author = "human";
+      if (suggestionUsed) {
+        author = newText.trim() === suggestionUsed.trim() ? "claude" : "collaborative";
+      }
+      onAddBlock(newText.trim(), insertingAfter, author);
       setNewText("");
       setInsertingAfter(null);
+      setSuggestionUsed(null);
+    }
+  };
+
+  const handleStartNext = () => {
+    const suggestion = onStartNextParagraph();
+    setInsertingAfter(justSavedBlockId);
+    setNewText(suggestion);
+    setSuggestionUsed(suggestion || null);
+  };
+
+  const handleEditPrev = () => {
+    const targetBlockId = onEditPrevious();
+    if (targetBlockId) {
+      setEditingBlockId(targetBlockId);
+      if (onClearPostSave) onClearPostSave();
     }
   };
 
   const renderInsertButton = (afterId) => {
     if (insertingAfter === afterId) {
+      const isSuggestionPrefill = suggestionUsed && newText === suggestionUsed;
       return (
         <div style={{ padding: "8px 16px 8px 20px" }}>
+          {/* Suggestion label */}
+          {suggestionUsed && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              fontSize: 11, fontFamily: C.sans, marginBottom: 6,
+              color: C.accent, opacity: 0.8,
+            }}>
+              <Sparkles size={12} />
+              Claude's suggestion — edit freely, then ⌘+Enter to save
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={newText}
@@ -60,11 +143,17 @@ export function DocumentPanel({
             }}
             onKeyDown={e => {
               if (e.key === "Enter" && e.metaKey) handleInsert();
-              if (e.key === "Escape") { setInsertingAfter(null); setNewText(""); }
+              if (e.key === "Escape") {
+                setInsertingAfter(null);
+                setNewText("");
+                setSuggestionUsed(null);
+                if (onClearPostSave) onClearPostSave();
+              }
             }}
             placeholder="Write your paragraph..."
             style={{
-              width: "100%", background: C.bgComposer, border: `1px solid ${C.accent}`,
+              width: "100%", background: C.bgComposer,
+              border: `1px solid ${suggestionUsed ? C.accent : C.accent}`,
               borderRadius: 8, padding: "12px 14px", color: C.text, fontSize: 16,
               fontFamily: C.serif, lineHeight: 1.8, resize: "none", outline: "none",
               minHeight: 60,
@@ -74,7 +163,7 @@ export function DocumentPanel({
             <span style={{ fontSize: 11, color: C.textMuted, fontFamily: C.sans, marginRight: "auto" }}>
               ⌘+Enter to add · Esc to cancel
             </span>
-            <button onClick={() => { setInsertingAfter(null); setNewText(""); }} style={{
+            <button onClick={() => { setInsertingAfter(null); setNewText(""); setSuggestionUsed(null); }} style={{
               padding: "6px 12px", borderRadius: 6, border: `1px solid ${C.border}`,
               background: "transparent", color: C.textMuted, fontSize: 12,
               fontFamily: C.sans, cursor: "pointer",
@@ -102,7 +191,17 @@ export function DocumentPanel({
       }}
       onMouseOver={e => e.currentTarget.style.opacity = "1"}
       onMouseOut={e => e.currentTarget.style.opacity = "0"}>
-        <button onClick={() => setInsertingAfter(afterId)} style={{
+        <button onClick={() => {
+          // If there's a pending suggestion, use it when clicking "+"
+          if (justSavedBlockId && nextSuggestion) {
+            const suggestion = onStartNextParagraph();
+            setInsertingAfter(afterId);
+            setNewText(suggestion);
+            setSuggestionUsed(suggestion || null);
+          } else {
+            setInsertingAfter(afterId);
+          }
+        }} style={{
           display: "flex", alignItems: "center", gap: 4, padding: "4px 12px",
           borderRadius: C.radiusPill, border: `1px dashed ${C.border}`,
           background: "transparent", color: C.textMuted, fontSize: 11,
@@ -111,6 +210,62 @@ export function DocumentPanel({
         onMouseOver={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
         onMouseOut={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textMuted; }}>
           <Plus size={11} /> Add paragraph
+        </button>
+      </div>
+    );
+  };
+
+  // Shortcut hint bar
+  const renderHintBar = () => {
+    if (!justSavedBlockId) return null;
+
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center",
+        gap: 20, padding: "10px 16px", background: C.bgComposer,
+        borderRadius: 8, border: `0.5px solid ${C.border}`,
+        margin: "8px 20px", animation: "fadeIn 0.3s ease",
+      }}>
+        <button onClick={handleStartNext} style={{
+          display: "flex", alignItems: "center", gap: 8,
+          background: "transparent", border: "none", cursor: "pointer",
+          color: C.textSec, fontSize: 12, fontFamily: C.sans,
+          padding: "4px 8px", borderRadius: 6, transition: "all 0.15s",
+        }}
+        onMouseOver={e => e.currentTarget.style.color = C.accent}
+        onMouseOut={e => e.currentTarget.style.color = C.textSec}>
+          <kbd style={{
+            background: C.bgDeep, padding: "2px 6px", borderRadius: 4,
+            fontSize: 11, fontFamily: C.mono, border: `1px solid ${C.border}`,
+            color: C.text,
+          }}>⌘↵</kbd>
+          <span>Next paragraph</span>
+          {isSuggestingNext && (
+            <span style={{ color: C.textMuted, fontStyle: "italic", fontSize: 11 }}>
+              thinking...
+            </span>
+          )}
+          {!isSuggestingNext && nextSuggestion && (
+            <Sparkles size={11} color={C.accent} />
+          )}
+        </button>
+
+        <div style={{ width: 1, height: 16, background: C.border }} />
+
+        <button onClick={handleEditPrev} style={{
+          display: "flex", alignItems: "center", gap: 8,
+          background: "transparent", border: "none", cursor: "pointer",
+          color: C.textSec, fontSize: 12, fontFamily: C.sans,
+          padding: "4px 8px", borderRadius: 6, transition: "all 0.15s",
+        }}
+        onMouseOver={e => e.currentTarget.style.color = C.blue}
+        onMouseOut={e => e.currentTarget.style.color = C.textSec}>
+          <kbd style={{
+            background: C.bgDeep, padding: "2px 6px", borderRadius: 4,
+            fontSize: 11, fontFamily: C.mono, border: `1px solid ${C.border}`,
+            color: C.text,
+          }}>⇧⌘↵</kbd>
+          <span>Edit previous</span>
         </button>
       </div>
     );
@@ -166,8 +321,12 @@ export function DocumentPanel({
               block={block}
               onUpdate={onUpdateBlock}
               onDelete={onDeleteBlock}
+              editingBlockId={editingBlockId}
+              onEditingComplete={() => setEditingBlockId(null)}
             />
           )}
+          {/* Show hint bar after the just-saved block */}
+          {block.id === justSavedBlockId && insertingAfter === null && renderHintBar()}
           {renderInsertButton(block.id)}
           {/* Show proposal after this block */}
           {getProposalAfter(block.id) && (

@@ -61,6 +61,13 @@ export default function ClaudeCompose() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const lastAnalyzedCount = useRef(0);
 
+  // ─── Auto-suggest state ──────────────────────────────────────────
+  const [justSavedBlockId, setJustSavedBlockId] = useState(null);
+  const [nextSuggestion, setNextSuggestion] = useState(null);
+  const [isSuggestingNext, setIsSuggestingNext] = useState(false);
+  const [editPreviousDepth, setEditPreviousDepth] = useState(0);
+  const suggestAbortRef = useRef(null);
+
   // ─── Welcome input ─────────────────────────────────────────────────
   const [welcomeInput, setWelcomeInput] = useState("");
 
@@ -249,31 +256,130 @@ export default function ClaudeCompose() {
   }, [blocks, calibration]);
 
   // ═══════════════════════════════════════════════════════════════════
+  // AUTO-SUGGEST: Background fetch for next paragraph
+  // ═══════════════════════════════════════════════════════════════════
+  const fetchNextSuggestion = useCallback(async (currentBlocks) => {
+    if (suggestAbortRef.current) suggestAbortRef.current.abort();
+    setIsSuggestingNext(true);
+    setNextSuggestion(null);
+
+    try {
+      suggestAbortRef.current = new AbortController();
+      const res = await fetch("/api/compose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{
+            role: "user",
+            content: `The author just added a new paragraph to the document. Based on the document's flow, voice, and direction, suggest what paragraph should come next. Respond with ONLY a [PROPOSAL] block targeting the end of the document. Keep it to a single paragraph that continues the natural flow.`,
+          }],
+          documentBlocks: currentBlocks,
+          voiceProfile,
+          calibration,
+        }),
+        signal: suggestAbortRef.current.signal,
+      });
+
+      if (!res.ok) return;
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") break;
+          try {
+            const event = JSON.parse(data);
+            if (event.type === "text") text += event.text;
+          } catch (e) {}
+        }
+      }
+
+      const parsed = parseProposals(text);
+      if (parsed.length > 0 && parsed[0].text) {
+        setNextSuggestion(parsed[0].text);
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        console.error("Suggestion fetch error:", err);
+      }
+    } finally {
+      setIsSuggestingNext(false);
+    }
+  }, [voiceProfile, calibration]);
+
+  const clearPostSaveState = useCallback(() => {
+    setJustSavedBlockId(null);
+    setEditPreviousDepth(0);
+    if (suggestAbortRef.current) suggestAbortRef.current.abort();
+  }, []);
+
+  const handleStartNextParagraph = useCallback(() => {
+    const suggestion = nextSuggestion || "";
+    clearPostSaveState();
+    return suggestion;
+  }, [nextSuggestion, clearPostSaveState]);
+
+  const handleEditPrevious = useCallback(() => {
+    const acceptedBlocks = blocks.filter(b => b.status === "accepted");
+    if (acceptedBlocks.length === 0) return undefined;
+
+    const newDepth = editPreviousDepth + 1;
+    const targetIndex = acceptedBlocks.length - newDepth;
+    if (targetIndex < 0) return undefined;
+
+    setEditPreviousDepth(newDepth);
+    const targetBlockId = acceptedBlocks[targetIndex].id;
+    return targetBlockId;
+  }, [blocks, editPreviousDepth]);
+
+  // ═══════════════════════════════════════════════════════════════════
   // DOCUMENT OPERATIONS
   // ═══════════════════════════════════════════════════════════════════
-  const addBlock = (text, afterId) => {
+  const addBlock = (text, afterId, author = "human") => {
     const newBlock = {
       id: genId(),
       text,
-      author: "human",
+      author,
       status: "accepted",
       reasoning: null,
     };
 
-    setBlocks(prev => {
-      if (afterId === "start" || prev.length === 0) return [newBlock, ...prev];
+    // Compute the new blocks array synchronously for use in background fetch
+    const computeNewBlocks = (prev) => {
+      if (afterId === "start" || prev.length === 0) {
+        return [newBlock, ...prev];
+      }
       const idx = prev.findIndex(b => b.id === afterId);
       if (idx === -1) return [...prev, newBlock];
       return [...prev.slice(0, idx + 1), newBlock, ...prev.slice(idx + 1)];
-    });
+    };
+
+    const updatedBlocks = computeNewBlocks(blocks);
+    setBlocks(computeNewBlocks);
+
+    // Trigger post-save flow: hint bar + auto-suggest
+    setJustSavedBlockId(newBlock.id);
+    setEditPreviousDepth(0);
+    setNextSuggestion(null);
+
+    // Fetch next suggestion in background
+    setTimeout(() => {
+      fetchNextSuggestion(updatedBlocks);
+    }, 100);
 
     // Trigger voice analysis after 2+ human blocks
-    setTimeout(() => {
-      const humanCount = blocks.filter(b => b.author === "human").length + 1;
-      if (humanCount >= 2 && humanCount > lastAnalyzedCount.current) {
-        analyzeVoice();
-      }
-    }, 500);
+    const humanCount = updatedBlocks.filter(b => b.author === "human").length;
+    if (humanCount >= 2 && humanCount > lastAnalyzedCount.current) {
+      setTimeout(() => analyzeVoice(), 500);
+    }
   };
 
   const updateBlock = (id, text) => {
@@ -481,6 +587,12 @@ export default function ClaudeCompose() {
             onAcceptProposal={acceptProposal}
             onRejectProposal={rejectProposal}
             onRiffProposal={riffProposal}
+            justSavedBlockId={justSavedBlockId}
+            nextSuggestion={nextSuggestion}
+            isSuggestingNext={isSuggestingNext}
+            onStartNextParagraph={handleStartNextParagraph}
+            onEditPrevious={handleEditPrevious}
+            onClearPostSave={clearPostSaveState}
           />
           <ChatPanel
             messages={messages}
