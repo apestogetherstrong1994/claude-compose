@@ -75,11 +75,19 @@ export function ProposalBlock({ proposal, onAccept, onReject, onRiff, isStreamin
           </div>
         </div>
       ) : (
-        <p style={{
-          fontFamily: C.serif, fontSize: 16, lineHeight: 1.8,
-          color: C.text, margin: 0, whiteSpace: "pre-wrap",
-          opacity: isStreaming ? 0.9 : 1,
-        }}>
+        <p
+          onClick={!isStreaming ? handleRiff : undefined}
+          style={{
+            fontFamily: C.serif, fontSize: 16, lineHeight: 1.8,
+            color: C.text, margin: 0, whiteSpace: "pre-wrap",
+            opacity: isStreaming ? 0.9 : 1,
+            cursor: isStreaming ? "default" : "text",
+            borderRadius: 6, padding: "2px 0",
+            transition: "background 0.15s",
+          }}
+          onMouseOver={e => { if (!isStreaming) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+          onMouseOut={e => e.currentTarget.style.background = "transparent"}
+        >
           {proposal.text || ""}
           {isStreaming && <span style={{ animation: "pulse 1.4s ease-in-out infinite" }}>|</span>}
         </p>
