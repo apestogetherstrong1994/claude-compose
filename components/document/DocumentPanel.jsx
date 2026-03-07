@@ -5,6 +5,7 @@ import { Plus, ArrowRight, Sparkles } from "lucide-react";
 import { C } from "../design-system";
 import { ParagraphBlock } from "./ParagraphBlock";
 import { ProposalBlock } from "./ProposalBlock";
+import { RevisionBlock } from "./RevisionBlock";
 import { ContributionBar } from "./ContributionBar";
 
 export function DocumentPanel({
@@ -308,6 +309,16 @@ export function DocumentPanel({
     return proposals.find(p => p.target === `after_block_${blockId}`);
   };
 
+  // Find revision proposals (replace_block_X) for a given block
+  const getRevisionForBlock = (blockId) => {
+    const finalized = proposals.find(p => p.target === `replace_block_${blockId}`);
+    if (finalized) return { proposal: finalized, isStreaming: false };
+    if (streamingProposal && streamingProposal.target === `replace_block_${blockId}`) {
+      return { proposal: streamingProposal, isStreaming: true };
+    }
+    return null;
+  };
+
   const hasContent = blocks.length > 0 || proposals.length > 0 || streamingProposal;
 
   return (
@@ -346,34 +357,49 @@ export function DocumentPanel({
       {hasContent && insertingAfter !== "start" && renderInsertButton("start")}
 
       {/* Blocks + proposals */}
-      {blocks.map((block) => (
-        <div key={block.id}>
-          {block.status === "accepted" && (
-            <ParagraphBlock
-              block={block}
-              onUpdate={onUpdateBlock}
-              onDelete={onDeleteBlock}
-              editingBlockId={editingBlockId}
-              onEditingComplete={() => setEditingBlockId(null)}
-            />
-          )}
-          {/* Show hint bar after the just-saved block */}
-          {block.id === justSavedBlockId && insertingAfter === null && renderHintBar()}
-          {renderInsertButton(block.id)}
-          {/* Show proposal after this block */}
-          {getProposalAfter(block.id) && (
-            <ProposalBlock
-              proposal={getProposalAfter(block.id)}
-              onAccept={() => onAcceptProposal(getProposalAfter(block.id))}
-              onReject={() => onRejectProposal(getProposalAfter(block.id))}
-              onRiff={(text) => onRiffProposal(getProposalAfter(block.id), text)}
-            />
-          )}
-        </div>
-      ))}
+      {blocks.map((block) => {
+        const revision = getRevisionForBlock(block.id);
+        return (
+          <div key={block.id}>
+            {block.status === "accepted" && (
+              <ParagraphBlock
+                block={block}
+                onUpdate={onUpdateBlock}
+                onDelete={onDeleteBlock}
+                editingBlockId={editingBlockId}
+                onEditingComplete={() => setEditingBlockId(null)}
+                highlighted={!!revision}
+              />
+            )}
+            {/* Show revision block inline after the highlighted paragraph */}
+            {revision && (
+              <RevisionBlock
+                originalBlock={block}
+                proposal={revision.proposal}
+                isStreaming={revision.isStreaming}
+                onAccept={() => onAcceptProposal(revision.proposal)}
+                onReject={() => onRejectProposal(revision.proposal)}
+                onRiff={(text) => onRiffProposal(revision.proposal, text)}
+              />
+            )}
+            {/* Show hint bar after the just-saved block */}
+            {block.id === justSavedBlockId && insertingAfter === null && renderHintBar()}
+            {renderInsertButton(block.id)}
+            {/* Show proposal after this block */}
+            {getProposalAfter(block.id) && (
+              <ProposalBlock
+                proposal={getProposalAfter(block.id)}
+                onAccept={() => onAcceptProposal(getProposalAfter(block.id))}
+                onReject={() => onRejectProposal(getProposalAfter(block.id))}
+                onRiff={(text) => onRiffProposal(getProposalAfter(block.id), text)}
+              />
+            )}
+          </div>
+        );
+      })}
 
       {/* Streaming proposal (appears at end if no specific target) */}
-      {streamingProposal && (
+      {streamingProposal && !streamingProposal.target?.startsWith("replace_block_") && (
         <ProposalBlock
           proposal={streamingProposal}
           isStreaming={true}
@@ -385,7 +411,12 @@ export function DocumentPanel({
 
       {/* Proposals without specific targets (new paragraphs at end) */}
       {proposals
-        .filter(p => !p.target || p.target === "end" || !p.target.startsWith("after_block_"))
+        .filter(p => {
+          if (!p.target || p.target === "end") return true;
+          if (p.target.startsWith("after_block_")) return false;
+          if (p.target.startsWith("replace_block_")) return false;
+          return true;
+        })
         .map((proposal, i) => (
           <ProposalBlock
             key={`proposal-${i}`}

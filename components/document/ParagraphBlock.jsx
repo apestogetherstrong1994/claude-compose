@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Pencil, Check, X } from "lucide-react";
 import { C } from "../design-system";
 
-export function ParagraphBlock({ block, onUpdate, onDelete, editingBlockId, onEditingComplete }) {
+export function ParagraphBlock({ block, onUpdate, onDelete, editingBlockId, onEditingComplete, highlighted }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(block.text);
   const [isHovered, setIsHovered] = useState(false);
@@ -52,10 +52,12 @@ export function ParagraphBlock({ block, onUpdate, onDelete, editingBlockId, onEd
       style={{
         position: "relative",
         padding: "12px 16px 12px 20px",
-        borderLeft: `2px solid ${authorColor[block.author] || "transparent"}`,
+        borderLeft: `2px solid ${highlighted ? C.accent : (authorColor[block.author] || "transparent")}`,
         borderRadius: 4,
         transition: "all 0.15s",
-        background: isHovered && !isEditing ? C.bgHover : "transparent",
+        background: highlighted
+          ? C.accentSoft
+          : (isHovered && !isEditing ? C.bgHover : "transparent"),
         animation: "fadeIn 0.3s ease",
       }}
     >

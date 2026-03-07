@@ -451,6 +451,12 @@ export default function ClaudeCompose() {
     };
 
     setBlocks(prev => {
+      // Handle replace_block_ targets (revision riffs) — replace in-place
+      if (proposal.target && proposal.target.startsWith("replace_block_")) {
+        const targetId = proposal.target.replace("replace_block_", "");
+        return prev.map(b => b.id === targetId ? { ...newBlock, id: b.id } : b);
+      }
+      // Handle after_block_ targets — insert after
       if (proposal.target && proposal.target.startsWith("after_block_")) {
         const targetId = proposal.target.replace("after_block_", "");
         const idx = prev.findIndex(b => b.id === targetId);
