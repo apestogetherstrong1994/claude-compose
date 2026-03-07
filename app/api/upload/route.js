@@ -1,101 +1,58 @@
+import Anthropic from "@anthropic-ai/sdk";
 import mammoth from "mammoth";
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
-// ─── Smart PDF text cleanup ──────────────────────────────────────────
-// PDF extractors produce single \n for soft line-wraps within paragraphs.
-// This function collapses those into spaces while preserving real paragraph breaks.
-function cleanPdfText(rawText) {
-  // Normalize line endings
-  let text = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 
-  // Handle hyphenated word breaks at end of line
-  // e.g., "compre-\nhensive" → "comprehensive"
-  text = text.replace(/([a-z])-\n([a-z])/g, "$1$2");
+// ─── Use Claude to extract properly chunked text from a PDF ─────────
+// Claude reads PDFs natively and understands paragraph structure far
+// better than any heuristic-based text parser can.
+async function extractPdfWithClaude(buffer) {
+  const base64 = buffer.toString("base64");
 
-  // Normalize multiple blank lines to exactly two newlines
-  text = text.replace(/\n{3,}/g, "\n\n");
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 16000,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: base64,
+            },
+          },
+          {
+            type: "text",
+            text: `Extract all the text from this document. Reproduce the text exactly as written — do not summarize, rephrase, or omit anything.
 
-  // Process line-by-line to collapse soft breaks into spaces
-  const lines = text.split("\n");
-  const result = [];
-  let i = 0;
+Rules:
+- Separate distinct paragraphs with exactly one blank line between them
+- Do NOT add blank lines within a single paragraph — keep each paragraph as one continuous block of text
+- Preserve the original wording, punctuation, and spelling exactly
+- Strip headers/footers, page numbers, and decorative elements
+- For letter-style documents: the date, address, greeting, and closing are each their own paragraph
+- Output ONLY the extracted text — no commentary, no labels, no markdown formatting`,
+          },
+        ],
+      },
+    ],
+  });
 
-  while (i < lines.length) {
-    const line = lines[i];
+  const text = response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n\n");
 
-    // Blank line → paragraph separator
-    if (line.trim() === "") {
-      result.push("");
-      i++;
-      continue;
-    }
-
-    // Accumulate continuation lines into current paragraph
-    let paragraph = line.trimEnd();
-    i++;
-
-    while (i < lines.length) {
-      const nextLine = lines[i];
-
-      // Blank line = paragraph break
-      if (nextLine.trim() === "") break;
-
-      const nextTrimmed = nextLine.trimStart();
-      const indent = nextLine.length - nextTrimmed.length;
-      const prevEndsWithTerminal = /[.!?:;]["'\u201D\u2019)\]]*\s*$/.test(paragraph);
-      const nextStartsLower = /^[a-z]/.test(nextTrimmed);
-      const nextStartsWithListMarker = /^(\d+[.)]\s|[-*]\s|[A-Z][.)]\s)/.test(nextTrimmed);
-      const nextIsShort = nextTrimmed.length < 40;
-      const nextLooksLikeHeading = nextIsShort && /^[A-Z]/.test(nextTrimmed) && !/[.,:;]$/.test(nextTrimmed);
-
-      // Significant indentation → new paragraph
-      if (indent >= 4 && !nextStartsLower) break;
-
-      // List item → new paragraph
-      if (nextStartsWithListMarker) break;
-
-      // Terminal punctuation + short uppercase line (heading) → new paragraph
-      if (prevEndsWithTerminal && nextLooksLikeHeading) break;
-
-      // Lowercase start → almost certainly a continuation
-      if (nextStartsLower) {
-        paragraph += " " + nextTrimmed;
-        i++;
-        continue;
-      }
-
-      // No terminal punctuation → mid-sentence wrap
-      if (!prevEndsWithTerminal) {
-        paragraph += " " + nextTrimmed;
-        i++;
-        continue;
-      }
-
-      // Terminal punctuation + uppercase start but no blank line →
-      // treat as same paragraph (reflowed text, new sentence)
-      paragraph += " " + nextTrimmed;
-      i++;
-    }
-
-    result.push(paragraph);
-  }
-
-  // Rejoin: non-empty lines separated by \n\n
-  let output = "";
-  for (let j = 0; j < result.length; j++) {
-    if (result[j] === "") {
-      if (!output.endsWith("\n\n")) output += "\n\n";
-    } else {
-      if (output && !output.endsWith("\n\n")) output += "\n\n";
-      output += result[j];
-    }
-  }
-
-  return output.trim();
+  return text.trim();
 }
 
 export async function POST(request) {
@@ -136,8 +93,7 @@ export async function POST(request) {
         .replace(/\n{3,}/g, "\n\n")
         .trim();
     } else if (ext === "pdf") {
-      const result = await pdfParse(buffer);
-      text = cleanPdfText(result.text);
+      text = await extractPdfWithClaude(buffer);
     }
 
     if (!text.trim()) {

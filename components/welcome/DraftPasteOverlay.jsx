@@ -137,7 +137,7 @@ export function DraftPasteOverlay({ onSubmit, onBack, mode = "continue" }) {
               onMouseOut={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textSec; }}
             >
               {isUploading ? (
-                <><Loader size={13} style={{ animation: "spin 1s linear infinite" }} /> Extracting text...</>
+                <><Loader size={13} style={{ animation: "spin 1s linear infinite" }} /> Reading document...</>
               ) : (
                 <><Upload size={13} /> Upload .docx or .pdf</>
               )}
