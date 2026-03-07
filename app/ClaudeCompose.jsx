@@ -12,28 +12,45 @@ import { LeftSidebar } from "@/components/sidebar/LeftSidebar";
 import { ClaudeLogo } from "@/components/icons/ClaudeLogo";
 import { parseProposals, parseVoiceProfile, stripStructuredBlocks } from "@/lib/proposal-parser";
 
-// ─── Calibration Questions ─────────────────────────────────────────
-const CALIBRATION_QUESTIONS = [
-  {
-    title: "What kind of writing is this?",
-    description: "This helps me calibrate my voice and suggestions.",
-    options: [
-      { label: "Essay", description: "Persuasive, analytical, or personal" },
-      { label: "Cover letter", description: "Professional, targeted, authentic" },
-      { label: "Fiction", description: "Short story, novel opening, creative" },
-      { label: "Email or memo", description: "Clear, concise, purposeful" },
-    ],
-  },
-  {
-    title: "How should we work together?",
-    description: "I can adapt my style to what works best for you.",
-    options: [
-      { label: "Guide me through it", description: "I'll ask questions and help you structure your thoughts" },
-      { label: "Let me write, then suggest", description: "I'll watch and offer proposals when you pause" },
-      { label: "Build it paragraph by paragraph", description: "We'll take turns proposing and refining" },
-    ],
-  },
-];
+// ─── Calibration Questions (per task type) ──────────────────────────
+const Q_WRITING_TYPE = {
+  title: "What kind of writing is this?",
+  description: "This helps me calibrate my voice and suggestions.",
+  options: [
+    { label: "Essay", description: "Persuasive, analytical, or personal" },
+    { label: "Cover letter", description: "Professional, targeted, authentic" },
+    { label: "Fiction", description: "Short story, novel opening, creative" },
+    { label: "Email or memo", description: "Clear, concise, purposeful" },
+  ],
+};
+
+const Q_WORD_LIMIT = {
+  title: "Is there a word limit?",
+  description: "This helps me calibrate the scope of suggestions.",
+  options: [
+    { label: "No limit", description: "Write as much as needed" },
+    { label: "Under 500 words", description: "Short and focused" },
+    { label: "Under 1,000 words", description: "Medium length" },
+    { label: "Under 2,000 words", description: "Longer form" },
+  ],
+};
+
+const Q_WORK_STYLE = {
+  title: "How should we work together?",
+  description: "I can adapt my style to what works best for you.",
+  options: [
+    { label: "Guide me through it", description: "I'll ask questions and help you structure your thoughts" },
+    { label: "Let me write, then suggest", description: "I'll watch and offer proposals when you pause" },
+    { label: "Build it paragraph by paragraph", description: "We'll take turns proposing and refining" },
+  ],
+};
+
+const getCalibrationQuestions = (taskType) => {
+  if (taskType === "spark" || taskType === "freeform") {
+    return [Q_WRITING_TYPE, Q_WORD_LIMIT, Q_WORK_STYLE];
+  }
+  return [Q_WRITING_TYPE, Q_WORK_STYLE];
+};
 
 // ─── Generate unique IDs ───────────────────────────────────────────
 let blockCounter = 0;
@@ -456,7 +473,7 @@ export default function ClaudeCompose() {
   // WELCOME & CALIBRATION
   // ═══════════════════════════════════════════════════════════════════
   const handleTaskCard = (type) => {
-    if (type === "continue") {
+    if (type === "continue" || type === "polish") {
       setTaskType(type);
       setPhase("pasting");
       return;
@@ -492,6 +509,31 @@ Don't ask me questions you can already answer from reading the text.`;
     streamMessage(initialPrompt, [], newBlocks);
   };
 
+  const handlePolishSubmit = (text) => {
+    const paragraphs = text.split(/\n\n+/).filter(Boolean);
+    const newBlocks = paragraphs.map(p => ({
+      id: genId(),
+      text: p.trim(),
+      author: "human",
+      status: "accepted",
+      reasoning: null,
+    }));
+    setBlocks(newBlocks);
+    setPhase("composing");
+
+    const initialPrompt = `I have a piece that needs polishing. I've pasted ${paragraphs.length} paragraph${paragraphs.length > 1 ? "s" : ""} into the document.
+
+Please:
+1. Read carefully
+2. Identify the type of writing and what it's trying to achieve
+3. Note what's working well
+4. Suggest specific improvements — propose a revised version of the weakest paragraph with a [PROPOSAL]
+
+Don't ask questions you can answer from reading the text.`;
+
+    streamMessage(initialPrompt, [], newBlocks);
+  };
+
   const handleWelcomeSubmit = (text) => {
     setTaskType("freeform");
     setPhase("calibrating");
@@ -500,10 +542,11 @@ Don't ask me questions you can already answer from reading the text.`;
   };
 
   const handleCalibrationSelect = (answer) => {
-    const questionTitle = CALIBRATION_QUESTIONS[calibrationIndex].title;
+    const questions = getCalibrationQuestions(taskType);
+    const questionTitle = questions[calibrationIndex].title;
     setCalibration(prev => ({ ...prev, [questionTitle]: answer }));
 
-    if (calibrationIndex < CALIBRATION_QUESTIONS.length - 1) {
+    if (calibrationIndex < questions.length - 1) {
       setCalibrationIndex(calibrationIndex + 1);
     } else {
       finishCalibration({ ...calibration, [questionTitle]: answer });
@@ -511,7 +554,8 @@ Don't ask me questions you can already answer from reading the text.`;
   };
 
   const handleCalibrationSkip = () => {
-    if (calibrationIndex < CALIBRATION_QUESTIONS.length - 1) {
+    const questions = getCalibrationQuestions(taskType);
+    if (calibrationIndex < questions.length - 1) {
       setCalibrationIndex(calibrationIndex + 1);
     } else {
       finishCalibration(calibration);
@@ -527,6 +571,7 @@ Don't ask me questions you can already answer from reading the text.`;
     let newBlocks = null;
     const writingType = finalCalibration["What kind of writing is this?"] || "general writing";
     const workStyle = finalCalibration["How should we work together?"] || "Build it paragraph by paragraph";
+    const wordLimit = finalCalibration["Is there a word limit?"];
 
     if (taskType === "continue" || finalCalibration.initialText) {
       const text = finalCalibration.initialText || "";
@@ -546,11 +591,11 @@ Don't ask me questions you can already answer from reading the text.`;
         initialPrompt = `I want to continue a ${writingType} piece. I'll paste my draft into the document panel. My preferred collaboration style: ${workStyle}`;
       }
     } else if (taskType === "spark") {
-      initialPrompt = `I want to start a new ${writingType} piece from scratch. Help me figure out what I want to say. Ask me one good question to get started. My preferred collaboration style: ${workStyle}`;
-    } else if (taskType === "polish") {
-      initialPrompt = `I have a ${writingType} piece that needs polishing. I'll add it to the document, and I'd like you to review it and suggest specific improvements. My preferred collaboration style: ${workStyle}`;
+      const limitNote = wordLimit && wordLimit !== "No limit" ? ` Target length: ${wordLimit.toLowerCase()}.` : "";
+      initialPrompt = `I want to start a new ${writingType} piece from scratch.${limitNote} Help me figure out what I want to say. Ask me one good question to get started. My preferred collaboration style: ${workStyle}`;
     } else {
-      initialPrompt = `I'd like to co-write a ${writingType} piece with you. My preferred collaboration style: ${workStyle}. Let's begin — ask me one question to get started.`;
+      const limitNote = wordLimit && wordLimit !== "No limit" ? ` Target length: ${wordLimit.toLowerCase()}.` : "";
+      initialPrompt = `I'd like to co-write a ${writingType} piece with you.${limitNote} My preferred collaboration style: ${workStyle}. Let's begin — ask me one question to get started.`;
     }
 
     streamMessage(initialPrompt, [], newBlocks);
@@ -580,8 +625,9 @@ Don't ask me questions you can already answer from reading the text.`;
       {/* Paste draft phase */}
       {phase === "pasting" && (
         <DraftPasteOverlay
-          onSubmit={handleDraftSubmit}
+          onSubmit={taskType === "polish" ? handlePolishSubmit : handleDraftSubmit}
           onBack={() => setPhase("welcome")}
+          mode={taskType}
         />
       )}
 
@@ -602,9 +648,9 @@ Don't ask me questions you can already answer from reading the text.`;
             </div>
           </div>
           <QuestionOverlay
-            question={CALIBRATION_QUESTIONS[calibrationIndex]}
+            question={getCalibrationQuestions(taskType)[calibrationIndex]}
             questionIndex={calibrationIndex}
-            totalQuestions={CALIBRATION_QUESTIONS.length}
+            totalQuestions={getCalibrationQuestions(taskType).length}
             onSelect={handleCalibrationSelect}
             onSkip={handleCalibrationSkip}
           />
