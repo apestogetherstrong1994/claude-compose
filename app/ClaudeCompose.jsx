@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { C } from "@/components/design-system";
 import { TopBar } from "@/components/layout/TopBar";
 import { WelcomeScreen } from "@/components/welcome/WelcomeScreen";
 import { DraftPasteOverlay } from "@/components/welcome/DraftPasteOverlay";
 import { QuestionOverlay } from "@/components/questions/QuestionOverlay";
 import { DocumentPanel } from "@/components/document/DocumentPanel";
+import { PolishPanel } from "@/components/document/PolishPanel";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { LeftSidebar } from "@/components/sidebar/LeftSidebar";
 import { ClaudeLogo } from "@/components/icons/ClaudeLogo";
-import { parseProposals, parseVoiceProfile, stripStructuredBlocks } from "@/lib/proposal-parser";
+import { parseProposals, parseVoiceProfile, stripStructuredBlocks, parseRewrite, parseStreamingRewrite } from "@/lib/proposal-parser";
 
 // ─── Calibration Questions (per task type) ──────────────────────────
 const Q_WRITING_TYPE = {
@@ -86,6 +87,12 @@ export default function ClaudeCompose() {
   const [editPreviousDepth, setEditPreviousDepth] = useState(0);
   const suggestAbortRef = useRef(null);
 
+  // ─── Polish mode state ─────────────────────────────────────────────
+  const [polishRevisions, setPolishRevisions] = useState([]);
+  const [polishReviewIndex, setPolishReviewIndex] = useState(0);
+  const [polishComplete, setPolishComplete] = useState(false);
+  const [polishStreamingRevisions, setPolishStreamingRevisions] = useState([]);
+
   // ─── Welcome input ─────────────────────────────────────────────────
   const [welcomeInput, setWelcomeInput] = useState("");
 
@@ -141,6 +148,25 @@ export default function ClaudeCompose() {
             const event = JSON.parse(data);
             if (event.type === "text") {
               fullText += event.text;
+
+              // Check for streaming [REWRITE] blocks (polish mode)
+              if (fullText.includes("[REWRITE]")) {
+                const rewriteEnd = fullText.indexOf("[/REWRITE]");
+                if (rewriteEnd !== -1) {
+                  // Rewrite complete
+                  const finalRevisions = parseRewrite(fullText);
+                  if (finalRevisions.length > 0) {
+                    setPolishRevisions(finalRevisions);
+                    setPolishStreamingRevisions([]);
+                  }
+                } else {
+                  // Still streaming
+                  const { revisions: streamedRevs } = parseStreamingRewrite(fullText);
+                  if (streamedRevs.length > 0) {
+                    setPolishStreamingRevisions(streamedRevs);
+                  }
+                }
+              }
 
               // Check for streaming proposal
               const proposalStart = fullText.lastIndexOf("[PROPOSAL]");
@@ -469,6 +495,82 @@ export default function ClaudeCompose() {
   };
 
   // ═══════════════════════════════════════════════════════════════════
+  // POLISH REVIEW HANDLERS
+  // ═══════════════════════════════════════════════════════════════════
+  const handleAcceptRevision = useCallback((index) => {
+    setPolishRevisions(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], decision: "accepted" };
+      return updated;
+    });
+    setPolishReviewIndex(index + 1);
+  }, []);
+
+  const handleRejectRevision = useCallback((index) => {
+    setPolishRevisions(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], decision: "rejected" };
+      return updated;
+    });
+    setPolishReviewIndex(index + 1);
+  }, []);
+
+  const handleEditRevision = useCallback((index, editedText) => {
+    setPolishRevisions(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], decision: "edited", editedText };
+      return updated;
+    });
+    setPolishReviewIndex(index + 1);
+  }, []);
+
+  // Mark review complete when index reaches the end
+  useEffect(() => {
+    if (polishRevisions.length > 0 && polishReviewIndex >= polishRevisions.length) {
+      setPolishComplete(true);
+    }
+  }, [polishReviewIndex, polishRevisions.length]);
+
+  // Auto-advance unchanged paragraphs after 800ms
+  useEffect(() => {
+    if (
+      polishRevisions.length === 0 ||
+      polishComplete ||
+      polishReviewIndex >= polishRevisions.length
+    ) return;
+
+    const current = polishRevisions[polishReviewIndex];
+    if (current?.status === "unchanged" && current?.decision == null) {
+      const timer = setTimeout(() => {
+        handleAcceptRevision(polishReviewIndex);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [polishReviewIndex, polishRevisions, polishComplete, handleAcceptRevision]);
+
+  const handleAssembleDocument = useCallback(() => {
+    const assembledBlocks = blocks.map(block => {
+      const revision = polishRevisions.find(r => r.originalBlockId === block.id);
+      if (!revision) return block;
+
+      if (revision.decision === "accepted" && revision.status === "changed") {
+        return { ...block, text: revision.text, author: "claude" };
+      }
+      if (revision.decision === "edited") {
+        return { ...block, text: revision.editedText, author: "collaborative" };
+      }
+      // rejected or unchanged — keep original
+      return block;
+    });
+
+    setBlocks(assembledBlocks);
+    setPolishRevisions([]);
+    setPolishReviewIndex(0);
+    setPolishComplete(false);
+    setPolishStreamingRevisions([]);
+  }, [blocks, polishRevisions]);
+
+  // ═══════════════════════════════════════════════════════════════════
   // CHAT
   // ═══════════════════════════════════════════════════════════════════
   const handleChatSend = (text) => {
@@ -527,15 +629,46 @@ Don't ask me questions you can already answer from reading the text.`;
     setBlocks(newBlocks);
     setPhase("composing");
 
-    const initialPrompt = `I have a piece that needs polishing. I've pasted ${paragraphs.length} paragraph${paragraphs.length > 1 ? "s" : ""} into the document.
+    // Reset polish state
+    setPolishRevisions([]);
+    setPolishReviewIndex(0);
+    setPolishComplete(false);
+    setPolishStreamingRevisions([]);
 
-Please:
-1. Read carefully
-2. Identify the type of writing and what it's trying to achieve
-3. Note what's working well
-4. Suggest specific improvements — propose a revised version of the weakest paragraph with a [PROPOSAL]
+    // Build the block reference for the prompt
+    const blockRefs = newBlocks.map((b, i) => `Block ${b.id}: "${b.text.slice(0, 60)}${b.text.length > 60 ? "..." : ""}"`).join("\n");
 
-Don't ask questions you can answer from reading the text.`;
+    const initialPrompt = `I have a piece that needs polishing. I've pasted ${paragraphs.length} paragraph${paragraphs.length > 1 ? "s" : ""}.
+
+Please rewrite the entire document, improving each paragraph. Use the [REWRITE] format:
+
+[REWRITE]
+[PARAGRAPH 1]
+original_block: {block_id}
+status: changed
+reasoning: What you improved and why
+text: The revised paragraph text
+[/PARAGRAPH]
+
+[PARAGRAPH 2]
+original_block: {block_id}
+status: unchanged
+reasoning: This paragraph is already strong
+text: The original text, unchanged
+[/PARAGRAPH]
+[/REWRITE]
+
+The block IDs in the document are:
+${blockRefs}
+
+Rules:
+- Include EVERY paragraph — mark unchanged ones with status: unchanged
+- Match the author's voice and style
+- Be specific in reasoning
+- Make meaningful improvements, not just word-swapping
+- Preserve the author's intent and meaning
+
+Also include a brief conversational message about the overall piece and what you noticed.`;
 
     streamMessage(initialPrompt, [], newBlocks);
   };
@@ -671,23 +804,38 @@ Don't ask questions you can answer from reading the text.`;
             voiceProfile={voiceProfile}
             isAnalyzing={isAnalyzing}
           />
-          <DocumentPanel
-            blocks={blocks}
-            proposals={proposals}
-            streamingProposal={streamingProposal}
-            onAddBlock={addBlock}
-            onUpdateBlock={updateBlock}
-            onDeleteBlock={deleteBlock}
-            onAcceptProposal={acceptProposal}
-            onRejectProposal={rejectProposal}
-            onRiffProposal={riffProposal}
-            justSavedBlockId={justSavedBlockId}
-            nextSuggestion={nextSuggestion}
-            isSuggestingNext={isSuggestingNext}
-            onStartNextParagraph={handleStartNextParagraph}
-            onEditPrevious={handleEditPrevious}
-            onClearPostSave={clearPostSaveState}
-          />
+          {taskType === "polish" && (polishRevisions.length > 0 || polishStreamingRevisions.length > 0) ? (
+            <PolishPanel
+              blocks={blocks}
+              polishRevisions={polishRevisions}
+              streamingRevisions={polishStreamingRevisions}
+              reviewIndex={polishReviewIndex}
+              isStreaming={isStreaming}
+              onAcceptRevision={handleAcceptRevision}
+              onRejectRevision={handleRejectRevision}
+              onEditRevision={handleEditRevision}
+              onAssemble={handleAssembleDocument}
+              polishComplete={polishComplete}
+            />
+          ) : (
+            <DocumentPanel
+              blocks={blocks}
+              proposals={proposals}
+              streamingProposal={streamingProposal}
+              onAddBlock={addBlock}
+              onUpdateBlock={updateBlock}
+              onDeleteBlock={deleteBlock}
+              onAcceptProposal={acceptProposal}
+              onRejectProposal={rejectProposal}
+              onRiffProposal={riffProposal}
+              justSavedBlockId={justSavedBlockId}
+              nextSuggestion={nextSuggestion}
+              isSuggestingNext={isSuggestingNext}
+              onStartNextParagraph={handleStartNextParagraph}
+              onEditPrevious={handleEditPrevious}
+              onClearPostSave={clearPostSaveState}
+            />
+          )}
           <ChatPanel
             messages={messages}
             input={chatInput}

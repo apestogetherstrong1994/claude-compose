@@ -67,7 +67,7 @@ export async function POST(request) {
 
     const stream = await client.messages.stream({
       model: "claude-sonnet-4-5-20250929",
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: systemPrompt,
       messages: formattedMessages,
     });

@@ -160,6 +160,12 @@ export function DraftPasteOverlay({ onSubmit, onBack, mode = "continue" }) {
 
             <span style={{
               fontSize: 11, color: C.textMuted, fontFamily: C.sans,
+              fontStyle: "italic",
+            }}>
+              In this web app prototype, this can take up to 60s.
+            </span>
+            <span style={{
+              fontSize: 11, color: C.textMuted, fontFamily: C.sans,
               marginLeft: "auto",
             }}>
               or paste below
